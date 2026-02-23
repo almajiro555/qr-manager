@@ -110,7 +110,7 @@ def generate_pdf(pdf_path, data, imgs):
     c.rect(30, p_y, A4_W - 60, 25, stroke=0, fill=1)
     c.setFillColorRGB(*txt_c)
     c.setFont(FONT_NAME, 14)
-    c.drawString(40, p_y + 7, f"⚡ 使用電源: AC {data['power']}")
+    c.drawString(40, p_y + 7, f"■ 使用電源: AC {data['power']}")
 
     # 型番表示
     c.setFillColorRGB(0, 0, 0)
@@ -286,3 +286,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
