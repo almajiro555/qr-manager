@@ -200,13 +200,30 @@ def main():
                 target_url = match.iloc[-1]["URL"]
                 st.info(f"管理番号: {target_id} のファイルへ転送します。")
                 
-                # 自動転送（リダイレクト）の処理（HTMLとJavaScriptを埋め込む）
-                redirect_html = f"""
-                <meta http-equiv="refresh" content="0; url={target_url}">
-                <script>window.location.href = "{target_url}";</script>
+                # OneDriveのセキュリティ（埋め込み拒否）を回避するため、
+                # 確実に別タブで開く大きな専用ボタンを表示します。
+                link_html = f"""
+                <div style="text-align: center; margin-top: 40px;">
+                    <a href="{target_url}" target="_blank" style="
+                        display: inline-block;
+                        padding: 20px 40px;
+                        background-color: #0078D4;
+                        color: white;
+                        font-size: 22px;
+                        font-weight: bold;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                    ">
+                        📂 ここをタップしてPDFを開く
+                    </a>
+                    <p style="margin-top: 20px; color: #555; font-size: 14px;">
+                        ※セキュリティ保護のため、自動ジャンプは停止されています。<br>
+                        上のボタンをタップするとOneDriveの資料が開きます。
+                    </p>
+                </div>
                 """
-                st.markdown(redirect_html, unsafe_allow_html=True)
-                st.markdown(f"**[自動的に画面が切り替わらない場合はこちらをクリックしてください]({target_url})**")
+                st.markdown(link_html, unsafe_allow_html=True)
             else:
                 st.error(f"エラー: 管理番号 '{target_id}' は見つかりませんでした。")
         else:
@@ -286,4 +303,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
