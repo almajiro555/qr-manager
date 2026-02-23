@@ -197,18 +197,27 @@ def main():
                 target_url = match.iloc[-1]["URL"]
                 
                 # メッセージをすべて削除し、ボタンのみをシンプルに表示
-                # ワンタップ（0クリック）の自動ジャンプ処理を復活
-                redirect_html = f"""
-                <meta http-equiv="refresh" content="0; url={target_url}">
-                <script>window.location.href = "{target_url}";</script>
-                <div style="text-align: center; margin-top: 50px;">
-                    <p style="font-size: 18px; font-weight: bold; color: #333;">🔄 PDFを開いています...</p>
-                    <p style="margin-top: 20px; font-size: 12px; color: #888;">
-                        <a href="{target_url}" style="color: #888;">※画面が切り替わらない場合はここをタップ</a>
-                    </p>
+                # Chromeのセキュリティブロックを回避するため、新しいタブで開く専用ボタンを設置
+                link_html = f"""
+                <div style="text-align: center; margin-top: 60px;">
+                    <p style="font-size: 20px; font-weight: bold; color: #333;">✅ 資料の準備ができました</p>
+                    <a href="{target_url}" target="_blank" style="
+                        display: inline-block;
+                        margin-top: 15px;
+                        padding: 20px 40px;
+                        background-color: #28a745;
+                        color: white;
+                        font-size: 22px;
+                        font-weight: bold;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                    ">
+                        📄 ここをタップしてPDFを開く
+                    </a>
                 </div>
                 """
-                st.markdown(redirect_html, unsafe_allow_html=True)
+                st.markdown(link_html, unsafe_allow_html=True)
             else:
                 st.error(f"エラー: 管理番号 '{target_id}' は見つかりませんでした。")
         else:
@@ -288,6 +297,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
