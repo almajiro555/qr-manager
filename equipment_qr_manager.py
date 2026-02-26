@@ -1,18 +1,24 @@
-import os
-import io
-import re
-from pathlib import Path
-from datetime import datetime
 import streamlit as st
 import pandas as pd
 import qrcode
-from PIL import Image, ImageOps
-from reportlab.lib.pagesizes import A4
+import os
+import urllib.request
+from pathlib import Path
+from datetime import datetime
+
+# PDF生成用ライブラリ
 from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-import urllib.request
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+
+# --- 初期設定 ---
+DB_CSV = Path("devices.csv")
+QR_DIR = Path("qr_codes")
+PDF_DIR = Path("pdfs")
+QR_DIR.mkdir(exist_ok=True)
+PDF_DIR.mkdir(exist_ok=True)
 
 # --- 日本語フォントの設定（クラウド対応） ---
 try:
@@ -33,159 +39,90 @@ except:
     except:
         FONT_NAME = "Helvetica"
 
-# --- 設定 ---
-APP_TITLE = "設備QR管理システム（高画質・レイアウト調整版）"
-OUTPUT_DIR = Path("output")
-PDF_DIR = OUTPUT_DIR / "pdf"
-QR_DIR = OUTPUT_DIR / "qr"
-DB_CSV = OUTPUT_DIR / "devices.csv"
-A4_W, A4_H = A4
+# --- ユーティリティ関数 ---
+def safe_filename(name):
+    """ファイル名に使えない文字をアンダースコアに置換"""
+    keepcharacters = (' ', '.', '_', '-')
+    return "".join(c for c in name if c.isalnum() or c in keepcharacters).rstrip()
 
-def ensure_dirs():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    PDF_DIR.mkdir(parents=True, exist_ok=True)
-    QR_DIR.mkdir(parents=True, exist_ok=True)
-
-def safe_filename(s):
-    return re.sub(r"[\\/:*?\"<>|]", "_", str(s)).strip()
-
-def fit_contain(img, target_w, target_h):
-    """エラーを防ぎつつ、ズームしても文字が読める超高画質（約300dpi相当）に最適化する"""
-    if img is None: return None, 0, 0
+# --- PDF生成関数 ---
+def create_pdf(data, output_path):
+    c = canvas.Canvas(str(output_path), pagesize=A4)
+    width, height = A4
     
-    # EXIFの回転情報を適用（スマホ写真が横を向くのを防ぐ）
-    img = ImageOps.exif_transpose(img)
+    # 1. ヘッダー帯（黄色）
+    bg_c = (1.0, 0.84, 0.0) # #FFD700 (Gold/Yellow)
+    txt_c = (0.2, 0.2, 0.2)
+    c.setFillColorRGB(*bg_c)
+    c.rect(0, height - 100, width, 100, stroke=0, fill=1)
     
-    # 透過PNGなどをJPEG保存できるようにRGBに変換（ここでエラーによるフリーズを防ぎます）
-    if img.mode in ("RGBA", "P", "LA"):
-        img = img.convert("RGB")
-        
-    # 画像の元のアスペクト比を計算
-    img_ratio = img.width / img.height
-    target_ratio = target_w / target_h
-    
-    # 枠（target_w x target_h）に収まる最大の描画サイズを正確に計算
-    if img_ratio > target_ratio:
-        draw_w = target_w
-        draw_h = target_w / img_ratio
-    else:
-        draw_w = target_h * img_ratio
-        draw_h = target_h
-        
-    # ズームした際の画質を高く保つため、PDF上の描画サイズの4倍のピクセル数にリサイズ
-    # （これ以上大きくしてもPDFのファイルサイズが跳ね上がるだけで見た目は変わりません）
-    render_w = int(draw_w * 4)
-    render_h = int(draw_h * 4)
-    img.thumbnail((render_w, render_h), Image.Resampling.LANCZOS)
-    
-    return img, draw_w, draw_h
-
-def generate_pdf(pdf_path, data, imgs):
-    c = canvas.Canvas(str(pdf_path), pagesize=A4)
-    
-    # テキスト未入力処理
-    name = data['name'] if data['name'] else "ー"
-    model = data['model'] if data['model'] else "ー"
-    did = data['did'] if data['did'] else "ー"
-
-    # 背景
-    c.setFillColorRGB(1.00, 0.98, 0.90)
-    c.rect(0, 0, A4_W, A4_H, stroke=0, fill=1)
-
-    # タイトル帯（安全イエロー）
-    c.setFillColorRGB(1.00, 0.84, 0.00)
-    c.rect(0, A4_H - 80, A4_W, 80, stroke=0, fill=1)
-    
-    c.setFillColorRGB(0, 0, 0)
-    c.setFont(FONT_NAME, 24)
-    c.drawString(30, A4_H - 50, name)
+    # 2. 右上の管理番号
+    c.setFillColorRGB(*txt_c)
     c.setFont(FONT_NAME, 12)
-    c.drawRightString(A4_W - 30, A4_H - 30, f"管理番号: {did}")
-
-    # 電源表示帯
-    p_y = A4_H - 110
-    color = (0.96, 0.62, 0.04) if data['power'] == "200V" else (0.00, 0.47, 0.83)
-    txt_c = (0,0,0) if data['power'] == "200V" else (1,1,1)
-    c.setFillColorRGB(*color)
-    c.rect(30, p_y, A4_W - 60, 25, stroke=0, fill=1)
+    c.drawRightString(width - 40, height - 30, f"管理番号: {data['id']}")
+    
+    # 3. 機器名（タイトル）
+    c.setFont(FONT_NAME, 28)
+    c.drawString(40, height - 70, data['name'])
+    
+    # 4. 使用電源の帯（オレンジ）
+    p_y = height - 130
+    c.setFillColorRGB(0.95, 0.61, 0.13) # オレンジ
+    c.rect(40, p_y, width - 80, 24, stroke=0, fill=1)
+    
     c.setFillColorRGB(*txt_c)
     c.setFont(FONT_NAME, 14)
-    c.drawString(40, p_y + 7, f"■ 使用電源: AC {data['power']}")
+    # 絵文字を廃止し、確実に表示される四角マークに変更
+    c.drawString(45, p_y + 7, f"■ 使用電源: AC {data['power']}")
 
-    # 型番表示
-    c.setFillColorRGB(0, 0, 0)
-    c.setFont(FONT_NAME, 12)
-    c.drawString(30, p_y - 25, f"型番: {model}")
-
-    # 画像描画サブ関数
-    def draw_img(img, x, y, w, h, label, is_loto=False):
+    # ==========================================
+    # --- 新しい画像レイアウト（5枚配置） ---
+    # ==========================================
+    
+    # 画像を描画するための共通ヘルパー関数（枠線やNone表示も自動対応）
+    def draw_image_box(c, img_file, title, x, y, w, h):
         c.setFillColorRGB(0, 0, 0)
-        c.setFont(FONT_NAME, 11)
-        # ラベルは指定された枠の上端(y+h)の少し上に描画
-        c.drawString(x, y + h + 5, label)
+        c.setFont(FONT_NAME, 12)
+        c.drawString(x, y + h + 5, title) # タイトルを画像の上に配置
         
-        if img:
-            processed, draw_w, draw_h = fit_contain(img.copy(), w, h)
-            buf = io.BytesIO()
-            # エラー防止のためqualityは95に設定（ファイルサイズを抑えつつ十分に高画質です）
-            processed.save(buf, format="JPEG", quality=95)
-            
-            # 画像のX座標（枠内で中央揃え）
-            draw_x = x + (w - draw_w) / 2
-            # 画像のY座標（枠内で上端揃え: 枠の上端から画像の高さを引く）
-            draw_y = (y + h) - draw_h
-            
-            if is_loto:
-                c.setLineWidth(2); c.setStrokeColorRGB(1, 0, 0)
-                # LOTOの赤枠は実際の画像の大きさに合わせて描画する
-                c.rect(draw_x, draw_y, draw_w, draw_h, stroke=1, fill=0)
-            
-            # 高解像度データを指定の描画枠（draw_w, draw_h）に表示
-            c.drawImage(ImageReader(buf), draw_x, draw_y, draw_w, draw_h, mask='auto')
+        if img_file is not None:
+            try:
+                img = ImageReader(img_file)
+                # アスペクト比を維持して中央に描画
+                c.drawImage(img, x, y, width=w, height=h, preserveAspectRatio=True, anchor='c')
+            except Exception as e:
+                c.rect(x, y, w, h) # エラー時は枠だけ
         else:
+            # 画像がない場合は点線の枠と「None」を表示
             c.setDash(3, 3)
-            c.rect(x, y, w, h, stroke=1)
-            c.drawCentredString(x + w/2, y + h/2, "None (なし)")
-            c.setDash(1, 0)
+            c.rect(x, y, w, h)
+            c.setDash()
+            c.setFont(FONT_NAME, 10)
+            c.drawCentredString(x + w/2, y + h/2, f"None ({title}なし)")
 
-    # --- レイアウト座標計算（2x2均等グリッド配置） ---
-    # 1ページのA4サイズ（縦841.89）の余白を最大限に活かす
-    row1_top_y = p_y - 50 # 上段の上端（型番ラベルの下）
-    
-    # 4枚の画像を同じサイズにするための計算
-    # 横幅：左右の余白30ずつ(計60)と、中央の余白20を引いて2等分
-    box_w = (A4_W - 80) / 2 
-    # 高さ：A4の残りの高さを最大限活用（上下の余白とラベル分を考慮し300に設定）
-    box_h = 300 
-    
-    # X座標（左列と右列）
-    x_left = 30
-    x_right = x_left + box_w + 20
-    
-    # 1. 上段（機器外観 ＆ コンセント位置）
-    y1 = row1_top_y - box_h # 上段の下端Y座標
-    draw_img(imgs.get('overview'), x_left, y1, box_w, box_h, "機器外観")
-    draw_img(imgs.get('outlet'), x_right, y1, box_w, box_h, "コンセント位置")
+    # 1. 機器外観（上段・左）大きく配置
+    draw_image_box(c, data.get('img_exterior'), "機器外観", 40, 360, 250, 300)
 
-    # 2. 下段（資産管理ラベル ＆ LOTO手順書）
-    # 上段の下端から余白（ラベル文字など）を40pt空ける
-    row2_top_y = y1 - 40
-    y2 = row2_top_y - box_h # 下段の下端Y座標
-    
-    draw_img(imgs.get('asset'), x_left, y2, box_w, box_h, "資産管理ラベル")
-    
-    loto_label = "LOTO手順書（関連機器）" if data['is_related'] else "LOTO手順書"
-    draw_img(imgs.get('loto'), x_right, y2, box_w, box_h, loto_label, is_loto=True)
+    # 2. コンセント位置（上段・右の上半分）縮小して配置
+    draw_image_box(c, data.get('img_outlet'), "コンセント位置", 305, 520, 250, 140)
 
-    c.showPage()
+    # 3. 資産管理ラベル（上段・右の下半分）縮小して配置
+    draw_image_box(c, data.get('img_label'), "資産管理ラベル", 305, 360, 250, 140)
+
+    # 4. LOTO手順書 1ページ目（下段・左）
+    draw_image_box(c, data.get('img_loto1'), "LOTO手順書（1ページ目）", 40, 40, 250, 280)
+
+    # 5. LOTO手順書 2ページ目（下段・右）
+    draw_image_box(c, data.get('img_loto2'), "LOTO手順書（2ページ目）", 305, 40, 250, 280)
+
     c.save()
 
-# --- メイン画面 ---
+# --- メインアプリ ---
 def main():
-    # 1. URLパラメータを確認して「転送モード」か「通常の管理モード」かを判定
+    # URLパラメータの取得（QRコードからアクセスされたかを判定）
     query_params = st.query_params
     is_redirect_mode = "id" in query_params
-
+    
     if is_redirect_mode:
         st.set_page_config(page_title="PDFを開く", layout="centered")
         target_id = query_params["id"]
@@ -196,7 +133,6 @@ def main():
             if not match.empty:
                 target_url = match.iloc[-1]["URL"]
                 
-                # メッセージをすべて削除し、ボタンのみをシンプルに表示
                 # Chromeのセキュリティブロックを回避するため、新しいタブで開く専用ボタンを設置
                 link_html = f"""
                 <div style="text-align: center; margin-top: 60px;">
@@ -221,63 +157,83 @@ def main():
             else:
                 st.error(f"エラー: 管理番号 '{target_id}' は見つかりませんでした。")
         else:
-            st.error("エラー: 転送先を記録した台帳（devices.csv）がまだありません。")
-        return  # 転送モードの時はここで処理を終了し、下の管理画面は表示させない
-
-    # 2. ここから下は通常の「管理画面」
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
-    st.title(f"🛠 {APP_TITLE}")
-    ensure_dirs()
-    
-    with st.sidebar:
-        st.header("⚙️ システム設定")
-        st.caption("※クラウド公開後、発行されたアプリのURLに変更してください")
-        base_url = st.text_input("このアプリのURL", "http://localhost:8501")
+            st.error("エラー: データベースが見つかりません。")
+            
+    else:
+        # 管理者用画面（通常アクセス時）
+        st.set_page_config(page_title="設備QR＆PDF管理システム", layout="wide")
+        st.title("🏭 設備QR＆PDF管理システム")
+        
+        # 実行中のアプリのURLを取得
+        try:
+            from streamlit.runtime.scriptrunner import get_script_run_ctx
+            from streamlit.runtime import get_instance
+            # 最新のStreamlitでは動的URLの完全取得が難しいため、手動入力のフォールバックを用意
+            base_url = "https://あなたのアプリURL.streamlit.app"
+        except:
+            base_url = "https://あなたのアプリURL.streamlit.app"
+            
+        st.info("※ この画面はPCでのPDF作成・台帳登録用です。")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.header("1. 基本情報入力")
+            did = st.text_input("管理番号 (例: H-2699)")
+            name = st.text_input("設備名称 (例: 5t金型反転機)")
+            power = st.text_input("使用電源 (例: 200V)")
+            
+        with col2:
+            st.header("2. 画像アップロード")
+            img_exterior = st.file_uploader("機器外観", type=["png", "jpg", "jpeg"])
+            img_outlet = st.file_uploader("コンセント位置", type=["png", "jpg", "jpeg"])
+            img_label = st.file_uploader("資産管理ラベル", type=["png", "jpg", "jpeg"])
+            img_loto1 = st.file_uploader("LOTO手順書（1ページ目）", type=["png", "jpg", "jpeg"])
+            img_loto2 = st.file_uploader("LOTO手順書（2ページ目）", type=["png", "jpg", "jpeg"])
+            
         st.markdown("---")
-        st.header("1. 基本情報入力")
-        did = st.text_input("管理番号", "")
-        name = st.text_input("機器名称", "")
-        model = st.text_input("型番", "")
-        power = st.selectbox("使用電源", ["100V", "200V"])
-        st.markdown("---")
-        is_related = st.checkbox("LOTO手順書は関連機器のもの", value=False)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.header("2. 画像アップロード")
-        f1 = st.file_uploader("機器外観（縦長推奨）", type=['jpg','png','jpeg'])
-        f2 = st.file_uploader("コンセント位置", type=['jpg','png','jpeg'])
-        f3 = st.file_uploader("LOTO手順書", type=['jpg','png','jpeg'])
-        f4 = st.file_uploader("資産ラベル（縦長推奨）", type=['jpg','png','jpeg'])
-
-    with col2:
         st.header("3. PDF生成・保存")
         if st.button("PDFを生成してダウンロード", type="primary"):
-            imgs = {
-                'overview': Image.open(f1) if f1 else None,
-                'outlet': Image.open(f2) if f2 else None,
-                'loto': Image.open(f3) if f3 else None,
-                'asset': Image.open(f4) if f4 else None
-            }
-            pdf_path = PDF_DIR / f"{safe_filename(did if did else '未設定')}.pdf"
-            
-            data = {'did': did, 'name': name, 'model': model, 'power': power, 'is_related': is_related}
-            generate_pdf(pdf_path, data, imgs)
-            
-            with open(pdf_path, "rb") as f:
-                st.download_button("✅ PDFをダウンロード", f, file_name=pdf_path.name, mime="application/pdf")
-            st.success("高画質PDFの生成・レイアウト調整が完了しました。")
+            if did and name:
+                data = {
+                    "id": did,
+                    "name": name,
+                    "power": power,
+                    "img_exterior": img_exterior,
+                    "img_outlet": img_outlet,
+                    "img_label": img_label,
+                    "img_loto1": img_loto1,
+                    "img_loto2": img_loto2
+                }
+                
+                safe_id = safe_filename(did)
+                pdf_path = PDF_DIR / f"{safe_id}.pdf"
+                create_pdf(data, pdf_path)
+                
+                st.success(f"{pdf_path.name} の生成が完了しました！")
+                
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="📥 PDFをダウンロード",
+                        data=pdf_file,
+                        file_name=pdf_path.name,
+                        mime="application/pdf"
+                    )
+            else:
+                st.error("管理番号と設備名称は必須です。")
 
         st.markdown("---")
         st.header("4. 自動転送QRコード生成")
-        # 入力指示を変更します
-        long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】を貼り付け")
+        long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】（GitHub等のURL）を貼り付け")
         if st.button("QRコードを生成して台帳更新", type="secondary"):
             if long_url and did:
                 safe_id = safe_filename(did)
                 qr_path = QR_DIR / f"{safe_id}_qr.png"
                 
-                clean_base_url = base_url.rstrip("/")
+                # 自動的に取得できるベースURLがない場合は、Streamlitの仕様でハードコードの案内を出してもOKですが
+                # 今回は相対パス的にも処理できるようにダミーURLからの変換を使用します。
+                # ユーザーが実際にアクセスしているURLを使います。
+                clean_base_url = "https://qr-manager-ek25bude2xuugsffohk3fn.streamlit.app"
                 dynamic_url = f"{clean_base_url}/?id={did}"
                 
                 img_qr = qrcode.make(dynamic_url)
@@ -290,17 +246,9 @@ def main():
                 new_data = {"ID": did, "Name": name, "Power": power, "URL": long_url, "Updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                 df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
                 df.to_csv(DB_CSV, index=False)
-                st.info("台帳(devices.csv)に最終目的地（OneDrive）を記録しました。")
+                st.info("台帳(devices.csv)に最終目的地を記録しました。")
             else:
                 st.error("「管理番号」と「URL」の両方を入力してください。")
 
 if __name__ == "__main__":
-
     main()
-
-
-
-
-
-
-
