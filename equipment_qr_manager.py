@@ -1,7 +1,3 @@
-Copilot said: 完全に修正したコードをお作りします。以下は全ての問題を解決したバージョンです： ```python import streamlit as st import pandas as pd import
-完全に修正したコードをお作りします。以下は全ての問題を解決したバージョンです：
-
-Python
 import streamlit as st
 import pandas as pd
 import qrcode
@@ -389,3 +385,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
