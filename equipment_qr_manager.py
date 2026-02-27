@@ -22,24 +22,26 @@ PDF_DIR = Path("pdfs")
 QR_DIR.mkdir(exist_ok=True)
 PDF_DIR.mkdir(exist_ok=True)
 
+
 # --- 日本語フォントの設定（クラウド対応） ---
 try:
-    # 現場で圧倒的に読みやすい「BIZ UDゴシック」を自動ダウンロード
-    cloud_font_path = "BIZUDGothic-Regular.ttf"
-    if not os.path.exists(cloud_font_path):
-        font_url = "https://github.com/googlefonts/morisawa-biz-ud-gothic/raw/main/fonts/ttf/BIZUDGothic-Regular.ttf"
-        urllib.request.urlretrieve(font_url, cloud_font_path)
-    
-    pdfmetrics.registerFont(TTFont("BIZUDGothic", cloud_font_path))
-    FONT_NAME = "BIZUDGothic"
+    # 現場で圧倒的に読みやすい「BIZ UDゴシック」を自動ダウンロード
+    cloud_font_path = "BIZUDGothic-Regular.ttf"
+    if not os.path.exists(cloud_font_path):
+        font_url = "https://github.com/googlefonts/morisawa-biz-ud-gothic/raw/main/fonts/ttf/BIZUDGothic-Regular.ttf"
+        urllib.request.urlretrieve(font_url, cloud_font_path)
+
+    pdfmetrics.registerFont(TTFont("BIZUDGothic", cloud_font_path))
+    FONT_NAME = "BIZUDGothic"
+
 except:
-    try:
-        # ローカル環境（パソコン）のフォールバック
-        win_font_path = "C:/Windows/Fonts/meiryo.ttc"
-        pdfmetrics.registerFont(TTFont("Meiryo", win_font_path))
-        FONT_NAME = "Meiryo"
-    except:
-        FONT_NAME = "Helvetica"
+    try:
+        # ローカル環境（パソコン）のフォールバック
+        win_font_path = "C:/Windows/Fonts/meiryo.ttc"
+        pdfmetrics.registerFont(TTFont("Meiryo", win_font_path))
+        FONT_NAME = "Meiryo"
+    except:
+        FONT_NAME = "Helvetica"
 
 # --- ユーティリティ関数 ---
 def safe_filename(name):
@@ -320,6 +322,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
