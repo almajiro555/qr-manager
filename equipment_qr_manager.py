@@ -28,9 +28,7 @@ cloud_font_path = "BIZUDGothic-Regular.ttf"
 
 # --- 日本語フォントの設定（クラウド対応）---
 def setup_fonts():
-    """フォントのセットアップを行う（重複登録を避ける）"""
     global FONT_NAME, cloud_font_path
-    
     try:
         if not os.path.exists(cloud_font_path):
             font_url = "https://github.com/googlefonts/morisawa-biz-ud-gothic/raw/main/fonts/ttf/BIZUDGothic-Regular.ttf"
@@ -48,41 +46,31 @@ def setup_fonts():
         except Exception as e2:
             FONT_NAME = "Helvetica"
 
-# フォント初期化
 setup_fonts()
 
 # --- ユーティリティ関数 ---
 def safe_filename(name):
-    """ファイル名に使えない文字をアンダースコアに置換"""
     keepcharacters = (' ', '.', '_', '-')
     return "".join(c for c in name if c.isalnum() or c in keepcharacters).rstrip()
 
 # --- PDF生成関数 ---
 def create_pdf(data, output_path):
-    """PDFドキュメントを生成（新・最適化レイアウト搭載）"""
     c = canvas.Canvas(str(output_path), pagesize=A4)
     width, height = A4
     
-    # ==========================================
-    # --- ヘッダー領域 ---
-    # ==========================================
-    bg_c = (1.0, 0.84, 0.0)  # #FFD700 (Gold/Yellow)
+    bg_c = (1.0, 0.84, 0.0)
     txt_c = (0.2, 0.2, 0.2)
     c.setFillColorRGB(*bg_c)
     
-    # ヘッダーの高さ
     c.rect(0, height - 60, width, 60, stroke=0, fill=1)
     
-    # 右上の管理番号
     c.setFillColorRGB(*txt_c)
     c.setFont(FONT_NAME, 10)
     c.drawRightString(width - 20, height - 20, f"管理番号: {data['id']}")
     
-    # 機器名（タイトル）
     c.setFont(FONT_NAME, 22)
     c.drawString(20, height - 40, data['name'])
     
-    # 使用電源の帯（オレンジ）
     p_y = height - 85
     c.setFillColorRGB(0.95, 0.61, 0.13)
     c.rect(20, p_y, width - 40, 18, stroke=0, fill=1)
@@ -92,31 +80,23 @@ def create_pdf(data, output_path):
     power_text = data['power'] if data['power'] else "未設定"
     c.drawString(25, p_y + 4, f"■ 使用電源: AC {power_text}")
 
-    # ==========================================
-    # --- 画像レイアウトエンジン ---
-    # ==========================================
-    
     def draw_smart_image_box(c, img_file, title, x, y, w, h, none_title=None):
-        """スマホの回転バグだけを直し、本来の縦横比で描画する"""
         c.setFillColorRGB(0, 0, 0)
         c.setFont(FONT_NAME, 11)
-        c.drawString(x, y + h + 4, title)  # タイトルを画像の上に配置
+        c.drawString(x, y + h + 4, title)
         
         display_none_title = none_title if none_title else title
         
         if img_file is not None:
             try:
-                # 1. 画像の読み込み
                 if hasattr(img_file, 'read'):
                     img_data = img_file.read()
                     img = Image.open(io.BytesIO(img_data))
                 else:
                     img = Image.open(img_file)
                 
-                # 2. 【最重要】スマホ特有のEXIF回転バグのみ補正
                 img = ImageOps.exif_transpose(img)
                 
-                # 3. ReportLab用にRGB変換
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGB')
                 
@@ -124,18 +104,16 @@ def create_pdf(data, output_path):
                 img.save(img_byte_arr, format='JPEG', quality=90)
                 img_byte_arr.seek(0)
                 
-                # 4. 画像の描画
                 img_reader = ImageReader(img_byte_arr)
                 c.drawImage(img_reader, x, y, width=w, height=h, preserveAspectRatio=True, anchor='c')
                 
-                # 枠線を引く
                 c.setStrokeColorRGB(0.8, 0.8, 0.8)
                 c.rect(x, y, w, h)
                 c.setStrokeColorRGB(0, 0, 0)
                 
             except Exception as e:
                 print(f"画像読み込みエラー({title}): {str(e)}")
-                c.rect(x, y, w, h)  # エラー時は枠だけ表示
+                c.rect(x, y, w, h)
         else:
             c.setDash(3, 3)
             c.rect(x, y, w, h)
@@ -143,10 +121,6 @@ def create_pdf(data, output_path):
             c.setFont(FONT_NAME, 10)
             c.drawCentredString(x + w/2, y + h/2, f"None ({display_none_title}なし)")
 
-    # ---------------------------------------------------------
-    # 緻密に計算された新しいレイアウト座標（A4サイズに最適化）
-    # ---------------------------------------------------------
-    
     if data.get('is_related_loto'):
         loto_title1 = "LOTO手順書（関連機器）Page 1"
         loto_title2 = "LOTO手順書（関連機器）Page 2"
@@ -154,14 +128,10 @@ def create_pdf(data, output_path):
         loto_title1 = "LOTO手順書 Page 1"
         loto_title2 = "LOTO手順書 Page 2"
     
-    # 下段：LOTO手順書（縦長ドキュメントに最適なボックス）
     draw_smart_image_box(c, data.get('img_loto1'), loto_title1, 30, 40, 260, 360, none_title="LOTO手順書 Page 1")
     draw_smart_image_box(c, data.get('img_loto2'), loto_title2, 305, 40, 260, 360, none_title="LOTO手順書 Page 2")
 
-    # 上段左：機器外観（正方形に近く、どんな写真でも大きく表示）
     draw_smart_image_box(c, data.get('img_exterior'), "機器外観", 30, 440, 260, 280)
-
-    # 上段右：コンセント＆ラベル（横長の写真が自然に収まる横長ボックス）
     draw_smart_image_box(c, data.get('img_label'), "資産管理ラベル", 305, 440, 260, 130)
     draw_smart_image_box(c, data.get('img_outlet'), "コンセント位置", 305, 590, 260, 130)
 
@@ -203,7 +173,7 @@ def create_label_image(data):
             qr_pil_img = qr_pil_img.resize((140, 140))
             label_img.paste(qr_pil_img, (10, 50))
         except Exception as e:
-            print(f"QRコード埋め込みエラー: {str(e)}")
+            pass
     
     x_text = 160
     y_text = 50
@@ -272,14 +242,26 @@ def main():
         # --- ⚙️ システム設定（サイドバー） ---
         # ==========================================
         st.sidebar.header("⚙️ システム詳細設定")
-        st.sidebar.info("💡 ダウンロード先のフォルダを指定したい場合は、お使いのブラウザ（ChromeやEdge）の設定で「ダウンロード前に保存先を確認する」をオンにしてください。")
         
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("💾 自動保存モード設定")
+        # --- ここで保存先を選択させます ---
+        save_mode = st.sidebar.radio(
+            "PDFとQRコードの保存方式を選択:",
+            ["1. 手動ダウンロードのみ (現在の方式)", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"]
+        )
+        
+        if save_mode == "2. GitHubへ自動アップロード":
+            st.sidebar.warning("※機能実装準備中※\n次回、GitHubのアクセストークン（合鍵）を設定する機能を追加します。")
+        elif save_mode == "3. 社内共有フォルダへ自動保存":
+            st.sidebar.warning("※機能実装準備中※\n会社のPCで直接アプリを動かす（オンプレミス稼働）環境への移行が必要です。")
+            local_path = st.sidebar.text_input("共有フォルダのパス (例: Z:\\LOTO手順書)", value=r"C:\Equipment_PDF")
+
         st.sidebar.markdown("---")
         st.sidebar.subheader("📄 ファイル名出力設定")
         include_equip_name = st.sidebar.checkbox("ダウンロードファイル名に「設備名称」を含める", value=True)
-        st.sidebar.caption("例: チェックなし → 2699.pdf")
-        st.sidebar.caption("例: チェックあり → 2699_5t金型反転機.pdf")
         
+        # メイン画面
         st.title("🏭 設備QR＆PDF管理システム")
         st.info("※ この画面はPCでのPDF作成・台帳登録用です。")
         
@@ -347,6 +329,8 @@ def main():
 
         st.markdown("---")
         st.header("4. 自動転送QRコード生成")
+        
+        # 保存モードがGitHubまたは共有フォルダの時は手動URL入力を隠すなどのUI切り替え（現在は手動用のまま）
         long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】（GitHub等のURL）を貼り付け")
         if st.button("QRコードを生成して台帳更新", type="secondary"):
             if long_url and did and name and power:
@@ -413,4 +397,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
