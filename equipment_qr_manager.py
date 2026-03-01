@@ -464,7 +464,11 @@ def main():
                                 encoded_content = base64.b64encode(f.read()).decode("utf-8")
                             
                             file_name_for_github = f"{safe_id}_{safe_filename(name)}.pdf" if include_equip_name else f"{safe_id}.pdf"
-                            api_url = f"https://api.github.com/repos/{github_repo}/contents/pdfs/{file_name_for_github}"
+                            
+                            # --- 修正：日本語ファイル名をURL通信用に変換（エンコード） ---
+                            import urllib.parse
+                            encoded_file_name = urllib.parse.quote(file_name_for_github)
+                            api_url = f"https://api.github.com/repos/{github_repo}/contents/pdfs/{encoded_file_name}"
                             
                             sha = None
                             try:
@@ -532,5 +536,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
