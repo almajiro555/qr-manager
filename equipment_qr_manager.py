@@ -6,8 +6,8 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 import io
-import base64  # GitHub通信用
-import json    # GitHub通信用
+import base64
+import json
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # PDF生成用ライブラリ
@@ -54,6 +54,16 @@ setup_fonts()
 def safe_filename(name):
     keepcharacters = (' ', '.', '_', '-')
     return "".join(c for c in name if c.isalnum() or c in keepcharacters).rstrip()
+
+# --- 【追加】PDFプレビュー表示関数 ---
+def display_pdf(file_path):
+    """生成したPDFを画面上に埋め込んでプレビュー表示する"""
+    with open(file_path, "rb") as f:
+        base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+    
+    # PDFをiframeでHTMLとして埋め込む（高さ800pxで見やすく表示）
+    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
 # --- PDF生成関数 ---
 def create_pdf(data, output_path):
@@ -252,7 +262,6 @@ def main():
             ["1. 手動ダウンロードのみ (現在の方式)", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"]
         )
         
-        # --- GitHubの合鍵入力欄を追加 ---
         if save_mode == "2. GitHubへ自動アップロード":
             st.sidebar.info("💡 GitHubの合鍵（トークン）を設定すると全自動化されます。")
             github_repo = st.sidebar.text_input("リポジトリ名", value="equipment-portal/qr-manager")
@@ -288,44 +297,66 @@ def main():
             img_loto1 = st.file_uploader("LOTO手順書（1ページ目）", type=["png", "jpg", "jpeg"])
             img_loto2 = st.file_uploader("LOTO手順書（2ページ目）", type=["png", "jpg", "jpeg"])
             
+        # ==========================================
+        # --- 3. PDFプレビュー確認（新機能） ---
+        # ==========================================
         st.markdown("---")
-        st.header("3. PDFのプレビュー・手動保存")
-        if st.button("PDFを生成してプレビュー", type="secondary"):
+        st.header("3. PDFプレビュー確認")
+        st.info("💡 発行（クラウド保存）する前に、まずはここでPDFの出来栄えや画像の向きをチェックしてください。")
+        
+        if st.button("👀 PDFを生成してプレビューを表示", type="secondary"):
             if did and name and power:
-                try:
-                    data = {
-                        "id": did,
-                        "name": name,
-                        "power": power,
-                        "img_exterior": img_exterior,
-                        "img_outlet": img_outlet,
-                        "img_label": img_label,
-                        "img_loto1": img_loto1,
-                        "img_loto2": img_loto2,
-                        "is_related_loto": is_related_loto
-                    }
-                    safe_id = safe_filename(did)
-                    pdf_path = PDF_DIR / f"{safe_id}.pdf"
-                    create_pdf(data, pdf_path)
-                    
-                    dl_file_name = f"{safe_id}_{safe_filename(name)}.pdf" if include_equip_name else f"{safe_id}.pdf"
-                    
-                    if pdf_path.exists():
-                        st.success("プレビュー用のPDF生成が完了しました！")
-                        with open(pdf_path, "rb") as pdf_file:
-                            st.download_button(label="📥 PDFを手動でダウンロード", data=pdf_file, file_name=dl_file_name, mime="application/pdf")
-                except Exception as e:
-                    st.error(f"PDF生成エラー: {str(e)}")
+                with st.spinner("プレビューを作成中..."):
+                    try:
+                        data = {
+                            "id": did,
+                            "name": name,
+                            "power": power,
+                            "img_exterior": img_exterior,
+                            "img_outlet": img_outlet,
+                            "img_label": img_label,
+                            "img_loto1": img_loto1,
+                            "img_loto2": img_loto2,
+                            "is_related_loto": is_related_loto
+                        }
+                        
+                        safe_id = safe_filename(did)
+                        pdf_path = PDF_DIR / f"{safe_id}.pdf"
+                        
+                        # PDF作成
+                        create_pdf(data, pdf_path)
+                        
+                        if pdf_path.exists():
+                            st.success("✨ プレビューの作成に成功しました！内容に問題がなければ、下の「4. 本番発行」に進んでください。")
+                            # --- PDFを画面上に表示 ---
+                            display_pdf(pdf_path)
+                            
+                            # 手動ダウンロード用ボタンも一応表示しておく
+                            dl_file_name = f"{safe_id}_{safe_filename(name)}.pdf" if include_equip_name else f"{safe_id}.pdf"
+                            with open(pdf_path, "rb") as pdf_file:
+                                st.download_button(
+                                    label="📥 (手動用) プレビューしたPDFをダウンロード",
+                                    data=pdf_file,
+                                    file_name=dl_file_name,
+                                    mime="application/pdf"
+                                )
+                        else:
+                            st.error("エラー：PDFの保存に失敗しました。")
+                    except Exception as e:
+                        st.error(f"PDFプレビュー生成エラー: {str(e)}")
             else:
                 st.error("管理番号、設備名称、使用電源は全て必須です。")
 
+        # ==========================================
+        # --- 4. クラウド保存 ＆ QRコード生成（本番発行） ---
+        # ==========================================
         st.markdown("---")
-        st.header("4. クラウド保存 ＆ QRコード生成")
+        st.header("4. 本番発行 (保存 ＆ QRコード生成)")
         
         # ====== 手動モード ======
         if save_mode == "1. 手動ダウンロードのみ (現在の方式)":
             long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】（GitHub等のURL）を貼り付け")
-            if st.button("QRコードを生成して台帳更新", type="primary"):
+            if st.button("🚀 手動設定でQRコードを発行する", type="primary"):
                 if long_url and did and name and power:
                     try:
                         safe_id = safe_filename(did)
@@ -363,14 +394,14 @@ def main():
                     
         # ====== GitHub全自動モード ======
         elif save_mode == "2. GitHubへ自動アップロード":
-            st.info("💡 ボタン1つで、PDFの作成・GitHubへのアップロード・QRコードの発行を【全自動】で行います。")
-            if st.button("🚀 【全自動】PDF作成 ＋ GitHub保存 ＋ QRコード発行", type="primary"):
+            st.info("💡 プレビューで問題がなければ、ボタン1つで【GitHub保存 ＋ QR発行】を全自動で行います。")
+            if st.button("🚀 【全自動】PDFをGitHubへ保存して、QRコードを発行する", type="primary"):
                 if not github_repo or not github_token:
                     st.error("左の「⚙️ システム詳細設定」から、GitHubのリポジトリ名とアクセス・トークンを入力してください。")
                 elif did and name and power:
                     with st.spinner("🚀 GitHubのクラウドへ自動アップロード中...（約5〜10秒かかります）"):
                         try:
-                            # 1. PDFの作成
+                            # 1. PDFの再作成（最新の入力内容を確実に反映するため）
                             data = {
                                 "id": did,
                                 "name": name,
@@ -393,7 +424,6 @@ def main():
                             file_name_for_github = f"{safe_id}_{safe_filename(name)}.pdf" if include_equip_name else f"{safe_id}.pdf"
                             api_url = f"https://api.github.com/repos/{github_repo}/contents/pdfs/{file_name_for_github}"
                             
-                            # 既に同じファイルがあるかチェックして上書き対応する
                             sha = None
                             try:
                                 req_check = urllib.request.Request(api_url)
@@ -419,7 +449,6 @@ def main():
                             
                             with urllib.request.urlopen(req) as response:
                                 res_data = json.loads(response.read().decode("utf-8"))
-                                # GitHub上でPDFを表示するためのURLを取得
                                 github_pdf_url = res_data["content"]["html_url"]
                             
                             # 3. QRコードの生成と台帳登録
