@@ -318,7 +318,7 @@ def main():
             st.sidebar.info("💡 GitHubの合鍵（トークン）を設定すると全自動化されます。")
             github_repo = st.sidebar.text_input("リポジトリ名", value="equipment-portal/qr-manager")
             
-            # --- 修正：安全なStreamlit Secretsから合鍵を読み込む（コードへの直書きは禁止） ---
+            # --- 修正：安全なStreamlit Secrets（金庫）から合鍵を読み込む ---
             default_token = st.secrets.get("github_token", "")
             github_token = st.sidebar.text_input(
                 "アクセス・トークン (ghp_...)", 
@@ -554,6 +554,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
