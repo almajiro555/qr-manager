@@ -96,11 +96,15 @@ def create_pdf(data, output_path):
     # --- 画像レイアウトエンジン ---
     # ==========================================
     
-    def draw_smart_image_box(c, img_file, title, x, y, w, h):
+    # --- 変更：引数に「none_title」を追加 ---
+    def draw_smart_image_box(c, img_file, title, x, y, w, h, none_title=None):
         """スマホの回転バグだけを直し、本来の縦横比で描画する"""
         c.setFillColorRGB(0, 0, 0)
         c.setFont(FONT_NAME, 11)
         c.drawString(x, y + h + 4, title)  # タイトルを画像の上に配置
+        
+        # 画像がない時のテキスト（指定がなければ本来のタイトルを使用）
+        display_none_title = none_title if none_title else title
         
         if img_file is not None:
             try:
@@ -139,13 +143,12 @@ def create_pdf(data, output_path):
             c.rect(x, y, w, h)
             c.setDash()
             c.setFont(FONT_NAME, 10)
-            c.drawCentredString(x + w/2, y + h/2, f"None ({title}なし)")
+            c.drawCentredString(x + w/2, y + h/2, f"None ({display_none_title}なし)")
 
     # ---------------------------------------------------------
     # 緻密に計算された新しいレイアウト座標（A4サイズに最適化）
     # ---------------------------------------------------------
     
-    # --- 変更：チェックボックスの状態でLOTOのタイトルを切り替える ---
     if data.get('is_related_loto'):
         loto_title1 = "LOTO手順書（関連機器）Page 1"
         loto_title2 = "LOTO手順書（関連機器）Page 2"
@@ -154,8 +157,9 @@ def create_pdf(data, output_path):
         loto_title2 = "LOTO手順書 Page 2"
     
     # 下段：LOTO手順書（縦長ドキュメントに最適なボックス）
-    draw_smart_image_box(c, data.get('img_loto1'), loto_title1, 30, 40, 260, 360)
-    draw_smart_image_box(c, data.get('img_loto2'), loto_title2, 305, 40, 260, 360)
+    # --- 変更：none_titleを指定し、画像なしの時はスッキリした表示に固定 ---
+    draw_smart_image_box(c, data.get('img_loto1'), loto_title1, 30, 40, 260, 360, none_title="LOTO手順書 Page 1")
+    draw_smart_image_box(c, data.get('img_loto2'), loto_title2, 305, 40, 260, 360, none_title="LOTO手順書 Page 2")
 
     # 上段左：機器外観（正方形に近く、どんな写真でも大きく表示）
     draw_smart_image_box(c, data.get('img_exterior'), "機器外観", 30, 440, 260, 280)
