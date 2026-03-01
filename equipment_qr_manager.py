@@ -309,7 +309,7 @@ def main():
         st.sidebar.subheader("💾 自動保存モード設定")
         save_mode = st.sidebar.radio(
             "PDFとQRコードの保存方式を選択:",
-            ["1. 手動ダウンロードのみ (現在の方式)", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"],
+            ["1. 手動ダウンロードのみ", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"],
             index=1,
             key="save_mode_radio"  # ←追加：Streamlitの記憶をリセットして確実に反映させる
         )
@@ -551,4 +551,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
