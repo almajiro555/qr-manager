@@ -208,17 +208,19 @@ def create_label_image(data):
     label_img = Image.new('RGB', (w_px, h_px), 'white')
     draw = ImageDraw.Draw(label_img)
     
-    border_color = (255, 215, 0)
+    # 枠のカラーを、より見やすく鮮やかなピュア・イエロー（工場安全色）に変更
+    border_color = (255, 255, 0)
     border_width = 12 * scale
     draw.rectangle([0, 0, w_px - 1, h_px - 1], outline=border_color, width=border_width)
     
     font_path = cloud_font_path
     try:
         font_lg = ImageFont.truetype(font_path, 20 * scale)
-        font_sm = ImageFont.truetype(font_path, 12 * scale)
+        font_md = ImageFont.truetype(font_path, 18 * scale) # 追加: 機器名・電源用の大きなフォント
+        font_sm = ImageFont.truetype(font_path, 11 * scale) # 変更: 見出し用の少し小さなフォント
         font_xs = ImageFont.truetype(font_path, 9 * scale)
     except Exception as e:
-        font_lg = font_sm = font_xs = ImageFont.load_default()
+        font_lg = font_md = font_sm = font_xs = ImageFont.load_default()
     
     draw.text((20 * scale, 12 * scale), "≡", fill="black", font=font_lg)
     draw.text((50 * scale, 12 * scale), "機器情報・LOTO確認ラベル", fill="black", font=font_lg)
@@ -228,24 +230,33 @@ def create_label_image(data):
             qr_pil_img = data['img_qr']
             if hasattr(qr_pil_img, 'convert'):
                 qr_pil_img = qr_pil_img.convert('RGB')
-            qr_pil_img = qr_pil_img.resize((140 * scale, 140 * scale))
-            label_img.paste(qr_pil_img, (15 * scale, 50 * scale))
+            # QRコードを少し大きく表示
+            qr_pil_img = qr_pil_img.resize((145 * scale, 145 * scale))
+            label_img.paste(qr_pil_img, (15 * scale, 45 * scale))
         except Exception as e:
             pass
     
-    x_text = 165 * scale
-    y_text = 60 * scale
-    line_height = 25 * scale
+    # テキストの配置位置（X座標）
+    x_label = 170 * scale
+    x_data = 190 * scale  # データを少し右にずらして配置
+    
     device_name = data.get('name', '不明')
     device_power = data.get('power', '不明')
     
-    draw.text((x_text, y_text), f"機器名称: {device_name}", fill="black", font=font_sm)
-    draw.text((x_text, y_text + line_height), f"使用電源: AC {device_power}", fill="black", font=font_sm)
+    # 機器名称（2行に分けてメリハリをつける）
+    draw.text((x_label, 50 * scale), "機器名称:", fill="black", font=font_sm)
+    draw.text((x_data, 65 * scale), f"{device_name}", fill="black", font=font_md)
     
-    y_line = y_text + line_height * 2 + 10 * scale
-    draw.line((x_text, y_line, w_px - 20 * scale, y_line), fill="gray", width=1 * scale)
+    # 使用電源（2行に分けてメリハリをつける）
+    draw.text((x_label, 105 * scale), "使用電源:", fill="black", font=font_sm)
+    draw.text((x_data, 120 * scale), f"AC {device_power}", fill="black", font=font_md)
     
-    draw.text((x_text, y_line + 10 * scale), "[QR] 詳細スキャン (LOTO･外観･ｺﾝｾﾝﾄ)", fill="black", font=font_xs)
+    # 区切り線
+    y_line = 160 * scale
+    draw.line((x_label, y_line, w_px - 15 * scale, y_line), fill="gray", width=1 * scale)
+    
+    # 極短の案内文
+    draw.text((x_label, y_line + 10 * scale), "[QR] 詳細スキャン (LOTO･外観･ｺﾝｾﾝﾄ)", fill="black", font=font_xs)
     
     return label_img
 
@@ -616,3 +627,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
