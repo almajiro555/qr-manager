@@ -262,7 +262,7 @@ def create_label_image(data):
 
 # --- Excelラベル台帳への自動追記関数 ---
 def append_label_to_excel(label_img):
-    """生成されたラベルをExcelファイルに順に並べて保存する（下へ5個 → 右の列へ）"""
+    """生成されたラベルを重ならないようにセルのサイズを調整してExcelに保存する"""
     if not EXCEL_LABEL_PATH.exists():
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -281,12 +281,20 @@ def append_label_to_excel(label_img):
     col_idx = count // rows_per_col
     row_idx = count % rows_per_col
 
-    cell_col = 1 + (col_idx * 3)
-    cell_row = 2 + (row_idx * 5)
-    cell_ref = f"{get_column_letter(cell_col)}{cell_row}"
+    # 1列おき (A, C, E, G...) にして横の重なりと余白を確保
+    cell_col = 1 + (col_idx * 2)
+    # 1行おき (2, 4, 6, 8...) にして縦の重なりと余白を確保
+    cell_row = 2 + (row_idx * 2)
+    
+    col_letter = get_column_letter(cell_col)
+    cell_ref = f"{col_letter}{cell_row}"
 
     wb = openpyxl.load_workbook(EXCEL_LABEL_PATH)
     ws = wb.active
+
+    # ★重要：画像が重ならないよう、配置先のセルのサイズを画像サイズに合わせて広げる
+    ws.column_dimensions[col_letter].width = 52   # 幅：ラベルに合わせて約380px相当に拡大
+    ws.row_dimensions[cell_row].height = 160      # 高さ：ラベルに合わせて約205px相当に拡大
 
     img_byte_arr = io.BytesIO()
     print_w, print_h = 380, 205
@@ -627,5 +635,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
