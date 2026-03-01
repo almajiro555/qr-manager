@@ -145,9 +145,17 @@ def create_pdf(data, output_path):
     # 緻密に計算された新しいレイアウト座標（A4サイズに最適化）
     # ---------------------------------------------------------
     
+    # --- 変更：チェックボックスの状態でLOTOのタイトルを切り替える ---
+    if data.get('is_related_loto'):
+        loto_title1 = "LOTO手順書（関連機器）Page 1"
+        loto_title2 = "LOTO手順書（関連機器）Page 2"
+    else:
+        loto_title1 = "LOTO手順書 Page 1"
+        loto_title2 = "LOTO手順書 Page 2"
+    
     # 下段：LOTO手順書（縦長ドキュメントに最適なボックス）
-    draw_smart_image_box(c, data.get('img_loto1'), "LOTO手順書（1ページ目）", 30, 40, 260, 360)
-    draw_smart_image_box(c, data.get('img_loto2'), "LOTO手順書（2ページ目）", 305, 40, 260, 360)
+    draw_smart_image_box(c, data.get('img_loto1'), loto_title1, 30, 40, 260, 360)
+    draw_smart_image_box(c, data.get('img_loto2'), loto_title2, 305, 40, 260, 360)
 
     # 上段左：機器外観（正方形に近く、どんな写真でも大きく表示）
     draw_smart_image_box(c, data.get('img_exterior'), "機器外観", 30, 440, 260, 280)
@@ -384,4 +392,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
