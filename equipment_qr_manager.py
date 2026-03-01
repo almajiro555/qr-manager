@@ -301,7 +301,7 @@ def main():
         st.sidebar.subheader("💾 自動保存モード設定")
         save_mode = st.sidebar.radio(
             "PDFとQRコードの保存方式を選択:",
-            ["1. 手動ダウンロードのみ (現在の方式)", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"]
+            ["1. 手動ダウンロードのみ", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"]
         )
         
         if save_mode == "2. GitHubへ自動アップロード":
@@ -532,4 +532,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
