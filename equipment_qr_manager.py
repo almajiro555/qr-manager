@@ -96,14 +96,12 @@ def create_pdf(data, output_path):
     # --- 画像レイアウトエンジン ---
     # ==========================================
     
-    # --- 変更：引数に「none_title」を追加 ---
     def draw_smart_image_box(c, img_file, title, x, y, w, h, none_title=None):
         """スマホの回転バグだけを直し、本来の縦横比で描画する"""
         c.setFillColorRGB(0, 0, 0)
         c.setFont(FONT_NAME, 11)
         c.drawString(x, y + h + 4, title)  # タイトルを画像の上に配置
         
-        # 画像がない時のテキスト（指定がなければ本来のタイトルを使用）
         display_none_title = none_title if none_title else title
         
         if img_file is not None:
@@ -157,7 +155,6 @@ def create_pdf(data, output_path):
         loto_title2 = "LOTO手順書 Page 2"
     
     # 下段：LOTO手順書（縦長ドキュメントに最適なボックス）
-    # --- 変更：none_titleを指定し、画像なしの時はスッキリした表示に固定 ---
     draw_smart_image_box(c, data.get('img_loto1'), loto_title1, 30, 40, 260, 360, none_title="LOTO手順書 Page 1")
     draw_smart_image_box(c, data.get('img_loto2'), loto_title2, 305, 40, 260, 360, none_title="LOTO手順書 Page 2")
 
@@ -269,9 +266,22 @@ def main():
             st.error("エラー: データベースが見つかりません。")
             
     else:
-        st.set_page_config(page_title="設備QR＆PDF管理システム", layout="wide")
-        st.title("🏭 設備QR＆PDF管理システム")
+        st.set_page_config(page_title="設備QR＆PDF管理システム", layout="wide", initial_sidebar_state="expanded")
         
+        # ==========================================
+        # --- ⚙️ システム設定（サイドバー） ---
+        # ==========================================
+        st.sidebar.header("⚙️ システム詳細設定")
+        st.sidebar.info("💡 ダウンロード先のフォルダを指定したい場合は、お使いのブラウザ（ChromeやEdge）の設定で「ダウンロード前に保存先を確認する」をオンにしてください。")
+        
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📄 ファイル名出力設定")
+        include_equip_name = st.sidebar.checkbox("ダウンロードファイル名に「設備名称」を含める", value=False)
+        st.sidebar.caption("例: チェックなし → 2699.pdf")
+        st.sidebar.caption("例: チェックあり → 2699_5t金型反転機.pdf")
+        
+        # メイン画面
+        st.title("🏭 設備QR＆PDF管理システム")
         st.info("※ この画面はPCでのPDF作成・台帳登録用です。")
         
         col1, col2 = st.columns(2)
@@ -316,13 +326,19 @@ def main():
                     
                     create_pdf(data, pdf_path)
                     
+                    # ダウンロードファイル名の決定（サイドバーの設定を反映）
+                    if include_equip_name:
+                        dl_file_name = f"{safe_id}_{safe_filename(name)}.pdf"
+                    else:
+                        dl_file_name = f"{safe_id}.pdf"
+                    
                     if pdf_path.exists():
-                        st.success(f"{pdf_path.name} の生成が完了しました！")
+                        st.success(f"{dl_file_name} の生成が完了しました！")
                         with open(pdf_path, "rb") as pdf_file:
                             st.download_button(
                                 label="📥 PDFをダウンロード",
                                 data=pdf_file,
-                                file_name=pdf_path.name,
+                                file_name=dl_file_name,
                                 mime="application/pdf"
                             )
                     else:
@@ -382,10 +398,16 @@ def main():
                     
                     st.image(label_img, caption="2.5cm × 4cm 印刷用ラベル", width=300)
                     
+                    # ラベル画像のダウンロード名にも設定を反映
+                    if include_equip_name:
+                        label_dl_name = f"{safe_id}_{safe_filename(name)}_label.png"
+                    else:
+                        label_dl_name = f"{safe_id}_label.png"
+                    
                     st.download_button(
                         label="📥 ラベル画像(PNG)をダウンロード",
                         data=byte_im,
-                        file_name=f"{safe_id}_label.png",
+                        file_name=label_dl_name,
                         mime="image/png"
                     )
                 except Exception as e:
