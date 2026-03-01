@@ -6,7 +6,7 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 import io
-from PIL import Image, ImageDraw, ImageFont, ImageOps # ← ImageOpsを自動回転のために追加
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # PDF生成用ライブラリ
 from reportlab.pdfgen import canvas
@@ -32,18 +32,15 @@ def setup_fonts():
     global FONT_NAME, cloud_font_path
     
     try:
-        # 現場で圧倒的に読みやすい「BIZ UDゴシック」を自動ダウンロード
         if not os.path.exists(cloud_font_path):
             font_url = "https://github.com/googlefonts/morisawa-biz-ud-gothic/raw/main/fonts/ttf/BIZUDGothic-Regular.ttf"
             urllib.request.urlretrieve(font_url, cloud_font_path)
         
-        # 既に登録されているかチェック
         if "BIZUDGothic" not in pdfmetrics._fonts:
             pdfmetrics.registerFont(TTFont("BIZUDGothic", cloud_font_path))
         FONT_NAME = "BIZUDGothic"
     except Exception as e:
         try:
-            # ローカル環境（パソコン）のフォールバック
             win_font_path = "C:/Windows/Fonts/meiryo.ttc"
             if "Meiryo" not in pdfmetrics._fonts:
                 pdfmetrics.registerFont(TTFont("Meiryo", win_font_path))
@@ -62,32 +59,32 @@ def safe_filename(name):
 
 # --- PDF生成関数 ---
 def create_pdf(data, output_path):
-    """PDFドキュメントを生成（スマートレイアウトエンジン搭載）"""
+    """PDFドキュメントを生成（新・最適化レイアウト搭載）"""
     c = canvas.Canvas(str(output_path), pagesize=A4)
     width, height = A4
     
     # ==========================================
-    # --- ヘッダー領域の縮小化（写真スペースの最大化） ---
+    # --- ヘッダー領域 ---
     # ==========================================
     bg_c = (1.0, 0.84, 0.0)  # #FFD700 (Gold/Yellow)
     txt_c = (0.2, 0.2, 0.2)
     c.setFillColorRGB(*bg_c)
     
-    # ヘッダーの高さを100から「60」に大幅カット
+    # ヘッダーの高さ
     c.rect(0, height - 60, width, 60, stroke=0, fill=1)
     
     # 右上の管理番号
     c.setFillColorRGB(*txt_c)
-    c.setFont(FONT_NAME, 10) # サイズも控えめに
+    c.setFont(FONT_NAME, 10)
     c.drawRightString(width - 20, height - 20, f"管理番号: {data['id']}")
     
     # 機器名（タイトル）
-    c.setFont(FONT_NAME, 22) # 28から22に縮小
+    c.setFont(FONT_NAME, 22)
     c.drawString(20, height - 40, data['name'])
     
-    # 使用電源の帯（オレンジ）も細く上に詰める
-    p_y = height - 85 # 130から85に上に移動
-    c.setFillColorRGB(0.95, 0.61, 0.13)  # オレンジ
+    # 使用電源の帯（オレンジ）
+    p_y = height - 85
+    c.setFillColorRGB(0.95, 0.61, 0.13)
     c.rect(20, p_y, width - 40, 18, stroke=0, fill=1)
     
     c.setFillColorRGB(*txt_c)
@@ -96,11 +93,11 @@ def create_pdf(data, output_path):
     c.drawString(25, p_y + 4, f"■ 使用電源: AC {power_text}")
 
     # ==========================================
-    # --- 超スマート・画像レイアウトエンジン ---
+    # --- 画像レイアウトエンジン ---
     # ==========================================
     
     def draw_smart_image_box(c, img_file, title, x, y, w, h):
-        """画像の縦横比を自動判定し、枠に合わせて回転・最大化する"""
+        """スマホの回転バグだけを直し、本来の縦横比で描画する"""
         c.setFillColorRGB(0, 0, 0)
         c.setFont(FONT_NAME, 11)
         c.drawString(x, y + h + 4, title)  # タイトルを画像の上に配置
@@ -114,18 +111,10 @@ def create_pdf(data, output_path):
                 else:
                     img = Image.open(img_file)
                 
-                # 2. 【最重要】スマホ特有のEXIF回転バグを完全補正
+                # 2. 【最重要】スマホ特有のEXIF回転バグのみ補正（勝手な90度回転は廃止！）
                 img = ImageOps.exif_transpose(img)
                 
-                # 3. 縦横比の自動判定と最適化スピン
-                box_is_portrait = h > w # 枠が縦長かどうか
-                img_is_portrait = img.height > img.width # 画像が縦長かどうか
-                
-                # 枠と画像の向きが異なる場合、画像を90度回転させて余白をゼロに近づける
-                if box_is_portrait != img_is_portrait:
-                    img = img.rotate(-90, expand=True)
-                
-                # 4. ReportLab用にRGB変換して渡す
+                # 3. ReportLab用にRGB変換
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGB')
                 
@@ -133,14 +122,14 @@ def create_pdf(data, output_path):
                 img.save(img_byte_arr, format='JPEG', quality=90)
                 img_byte_arr.seek(0)
                 
-                # 画像の描画
+                # 4. 画像の描画（preserveAspectRatio=True により、枠内で自然な比率を維持）
                 img_reader = ImageReader(img_byte_arr)
                 c.drawImage(img_reader, x, y, width=w, height=h, preserveAspectRatio=True, anchor='c')
                 
-                # 見栄えを良くするため、薄いグレーの枠線を引く
+                # 枠線を引く
                 c.setStrokeColorRGB(0.8, 0.8, 0.8)
                 c.rect(x, y, w, h)
-                c.setStrokeColorRGB(0, 0, 0) # リセット
+                c.setStrokeColorRGB(0, 0, 0)
                 
             except Exception as e:
                 print(f"画像読み込みエラー({title}): {str(e)}")
@@ -152,18 +141,20 @@ def create_pdf(data, output_path):
             c.setFont(FONT_NAME, 10)
             c.drawCentredString(x + w/2, y + h/2, f"None ({title}なし)")
 
-    # 緻密に計算された新しいレイアウト座標（ミリ単位調整済み）
+    # ---------------------------------------------------------
+    # 緻密に計算された新しいレイアウト座標（A4サイズに最適化）
+    # ---------------------------------------------------------
     
-    # 下段：② LOTO手順書（2番目に大きい、縦長ボックス）
-    draw_smart_image_box(c, data.get('img_loto1'), "② LOTO手順書（1ページ目）", 20, 20, 270, 320)
-    draw_smart_image_box(c, data.get('img_loto2'), "② LOTO手順書（2ページ目）", 305, 20, 270, 320)
+    # 下段：LOTO手順書（縦長ドキュメントに最適なボックス）
+    draw_smart_image_box(c, data.get('img_loto1'), "LOTO手順書（1ページ目）", 30, 40, 260, 360)
+    draw_smart_image_box(c, data.get('img_loto2'), "LOTO手順書（2ページ目）", 305, 40, 260, 360)
 
-    # 上段：① 機器外観（1番大きい、ほぼ正方形〜縦長の超巨大ボックス）
-    draw_smart_image_box(c, data.get('img_exterior'), "① 機器外観", 20, 370, 350, 365)
+    # 上段左：機器外観（正方形に近く、どんな写真でも大きく表示）
+    draw_smart_image_box(c, data.get('img_exterior'), "機器外観", 30, 440, 260, 280)
 
-    # 上段右：③ コンセント＆ラベル（3番目、横長ボックス）
-    draw_smart_image_box(c, data.get('img_outlet'), "③ コンセント位置", 380, 560, 195, 175)
-    draw_smart_image_box(c, data.get('img_label'), "③ 資産管理ラベル", 380, 370, 195, 175)
+    # 上段右：コンセント＆ラベル（横長の写真が自然に収まる横長ボックス）
+    draw_smart_image_box(c, data.get('img_label'), "資産管理ラベル", 305, 440, 260, 130)
+    draw_smart_image_box(c, data.get('img_outlet'), "コンセント位置", 305, 590, 260, 130)
 
     c.save()
 
