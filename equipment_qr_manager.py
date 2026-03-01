@@ -8,6 +8,7 @@ from datetime import datetime
 import io
 import base64
 import json
+import streamlit.components.v1 as components  # ← PDFを別タブで開くために追加
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # PDF生成用ライブラリ
@@ -55,15 +56,56 @@ def safe_filename(name):
     keepcharacters = (' ', '.', '_', '-')
     return "".join(c for c in name if c.isalnum() or c in keepcharacters).rstrip()
 
-# --- 【追加】PDFプレビュー表示関数 ---
+# --- 【変更】PDFプレビュー表示関数（別タブで開く） ---
 def display_pdf(file_path):
-    """生成したPDFを画面上に埋め込んでプレビュー表示する"""
+    """生成したPDFを別タブ（新しいウィンドウ）で開くためのボタンを生成する"""
     with open(file_path, "rb") as f:
         base64_pdf = base64.b64encode(f.read()).decode('utf-8')
     
-    # PDFをiframeでHTMLとして埋め込む（高さ800pxで見やすく表示）
-    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
-    st.markdown(pdf_display, unsafe_allow_html=True)
+    # JavaScriptを使用して、PDFデータを新しいタブで開くボタンを作成
+    html_code = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+    .btn {{
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #17a2b8;
+        color: white;
+        text-decoration: none;
+        border-radius: 5px;
+        font-weight: bold;
+        font-family: sans-serif;
+        font-size: 16px;
+        cursor: pointer;
+        border: none;
+    }}
+    .btn:hover {{
+        background-color: #138496;
+    }}
+    </style>
+    </head>
+    <body style="margin: 0; padding: 10px 0;">
+        <button class="btn" onclick="openPdf()">👀 新しいウィンドウでPDFプレビューを開く</button>
+        <script>
+        function openPdf() {{
+            var pdfData = "{base64_pdf}";
+            var byteCharacters = atob(pdfData);
+            var byteNumbers = new Array(byteCharacters.length);
+            for (var i = 0; i < byteCharacters.length; i++) {{
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }}
+            var byteArray = new Uint8Array(byteNumbers);
+            var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+            var fileURL = URL.createObjectURL(file);
+            window.open(fileURL, '_blank');
+        }}
+        </script>
+    </body>
+    </html>
+    """
+    components.html(html_code, height=70)
 
 # --- PDF生成関数 ---
 def create_pdf(data, output_path):
@@ -490,3 +532,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
