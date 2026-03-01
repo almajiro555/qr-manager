@@ -10,7 +10,7 @@ import base64
 import json
 import streamlit.components.v1 as components
 
-# --- 追加：Excel操作用ライブラリ ---
+# --- Excel操作用ライブラリ ---
 import openpyxl
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
@@ -29,15 +29,19 @@ DB_CSV = Path("devices.csv")
 QR_DIR = Path("qr_codes")
 PDF_DIR = Path("pdfs")
 EXCEL_LABEL_PATH = Path("print_labels.xlsx")  # Excel台帳の保存先
-COUNT_FILE = Path("label_count.txt")          # Excelに貼った枚数を記憶するファイル
+
+# --- 追加：履歴管理用の設定 ---
+LABEL_HISTORY_FILE = Path("label_history.json")
+TEMP_LABEL_DIR = Path("temp_labels")
 QR_DIR.mkdir(exist_ok=True)
 PDF_DIR.mkdir(exist_ok=True)
+TEMP_LABEL_DIR.mkdir(exist_ok=True)
 
 # グローバルフォント設定
 FONT_NAME = "Helvetica"
 cloud_font_path = "BIZUDGothic-Regular.ttf"
 
-# --- 日本語フォントの設定（クラウド対応）---
+# --- 日本語フォントの設定 ---
 def setup_fonts():
     global FONT_NAME, cloud_font_path
     try:
@@ -64,7 +68,6 @@ def safe_filename(name):
     keepcharacters = (' ', '.', '_', '-')
     return "".join(c for c in name if c.isalnum() or c in keepcharacters).rstrip()
 
-# --- PDFプレビュー表示関数（別タブで開く） ---
 def display_pdf(file_path):
     with open(file_path, "rb") as f:
         base64_pdf = base64.b64encode(f.read()).decode('utf-8')
@@ -113,7 +116,6 @@ def display_pdf(file_path):
     """
     components.html(html_code, height=70)
 
-# --- PDF生成関数 ---
 def create_pdf(data, output_path):
     c = canvas.Canvas(str(output_path), pagesize=A4)
     width, height = A4
@@ -197,18 +199,13 @@ def create_pdf(data, output_path):
 
     c.save()
 
-# --- 印刷用ラベル生成関数 ---
 def create_label_image(data):
-    """
-    印刷用に高画質化し、理想のレイアウト（余白・文字サイズ最適化）を施したラベル画像を生成
-    """
     scale = 4  
     w_px, h_px = 380 * scale, 205 * scale
     
     label_img = Image.new('RGB', (w_px, h_px), 'white')
     draw = ImageDraw.Draw(label_img)
     
-    # 枠のカラーをより鮮やかなピュア・イエローに変更
     border_color = (255, 255, 0)
     border_width = 12 * scale
     draw.rectangle([0, 0, w_px - 1, h_px - 1], outline=border_color, width=border_width)
@@ -216,100 +213,142 @@ def create_label_image(data):
     font_path = cloud_font_path
     try:
         font_lg = ImageFont.truetype(font_path, 20 * scale)
-        font_md = ImageFont.truetype(font_path, 26 * scale) # 追加: 機器名称などを強調するための特大フォント
+        font_md = ImageFont.truetype(font_path, 26 * scale)
         font_sm = ImageFont.truetype(font_path, 11 * scale)
         font_xs = ImageFont.truetype(font_path, 9 * scale)
     except Exception as e:
         font_lg = font_md = font_sm = font_xs = ImageFont.load_default()
     
-    # 1. タイトル（上部枠との間に余白を作るため、Y座標を 12 -> 20 へ下げる）
     title_y = 20 * scale
     draw.text((20 * scale, title_y), "≡", fill="black", font=font_lg)
     draw.text((50 * scale, title_y), "機器情報・LOTO確認ラベル", fill="black", font=font_lg)
     
-    # 2. QRコード
     if 'img_qr' in data and data['img_qr'] is not None:
         try:
             qr_pil_img = data['img_qr']
             if hasattr(qr_pil_img, 'convert'):
                 qr_pil_img = qr_pil_img.convert('RGB')
-            # QRコードを少し大きく表示
             qr_pil_img = qr_pil_img.resize((145 * scale, 145 * scale))
-            label_img.paste(qr_pil_img, (15 * scale, 48 * scale)) # タイトルの移動に合わせて少し下げる
+            label_img.paste(qr_pil_img, (15 * scale, 48 * scale))
         except Exception as e:
             pass
     
-    # 3. テキスト配置（左に寄せて統一し、長い設備名にも対応する）
     x_text = 165 * scale
-    
     device_name = data.get('name', '不明')
     device_power = data.get('power', '不明')
     
-    # 機器名称（文字サイズを font_sm -> font_md へ大幅拡大）
     draw.text((x_text, 55 * scale), "機器名称:", fill="black", font=font_sm)
     draw.text((x_text, 70 * scale), f"{device_name}", fill="black", font=font_md)
     
-    # 使用電源（文字サイズを font_sm -> font_md へ大幅拡大）
     draw.text((x_text, 110 * scale), "使用電源:", fill="black", font=font_sm)
     draw.text((x_text, 125 * scale), f"AC {device_power}", fill="black", font=font_md)
     
-    # 4. 区切り線と案内文
     y_line = 165 * scale
     draw.line((x_text, y_line, w_px - 15 * scale, y_line), fill="gray", width=1 * scale)
     draw.text((x_text, y_line + 8 * scale), "[QR] 詳細スキャン (LOTO･外観･ｺﾝｾﾝﾄ)", fill="black", font=font_xs)
     
     return label_img
 
-# --- Excelラベル台帳への自動追記関数 ---
-def append_label_to_excel(label_img):
-    """生成されたラベルを重ならないようにセルのサイズを調整してExcelに保存する"""
-    if not EXCEL_LABEL_PATH.exists():
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "印刷用ラベルシート"
-        with open(COUNT_FILE, "w", encoding="utf-8") as f:
-            f.write("0")
-        wb.save(EXCEL_LABEL_PATH)
-
-    try:
-        with open(COUNT_FILE, "r", encoding="utf-8") as f:
-            count = int(f.read().strip())
-    except Exception:
-        count = 0
-
-    rows_per_col = 5
-    col_idx = count // rows_per_col
-    row_idx = count % rows_per_col
-
-    # 1列おき (A, C, E, G...) にして横の重なりと余白を確保
-    cell_col = 1 + (col_idx * 2)
-    # 1行おき (2, 4, 6, 8...) にして縦の重なりと余白を確保
-    cell_row = 2 + (row_idx * 2)
-    
-    col_letter = get_column_letter(cell_col)
-    cell_ref = f"{col_letter}{cell_row}"
-
-    wb = openpyxl.load_workbook(EXCEL_LABEL_PATH)
+# ==========================================
+# --- 高度なExcel履歴管理・再構築システム ---
+# ==========================================
+def rebuild_excel():
+    """履歴データをもとにExcelファイルをゼロから綺麗に再構築する"""
+    wb = openpyxl.Workbook()
     ws = wb.active
+    ws.title = "印刷用ラベルシート"
+    
+    history = []
+    if LABEL_HISTORY_FILE.exists():
+        try:
+            with open(LABEL_HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except:
+            pass
+            
+    for count, item in enumerate(history):
+        img_path = TEMP_LABEL_DIR / item["img_filename"]
+        if not img_path.exists():
+            continue
+            
+        rows_per_col = 5
+        col_idx = count // rows_per_col
+        row_idx = count % rows_per_col
 
-    # ★重要：画像が重ならないよう、配置先のセルのサイズを画像サイズに合わせて広げる
-    ws.column_dimensions[col_letter].width = 52   # 幅：ラベルに合わせて約380px相当に拡大
-    ws.row_dimensions[cell_row].height = 160      # 高さ：ラベルに合わせて約205px相当に拡大
+        cell_col = 1 + (col_idx * 2)
+        cell_row = 2 + (row_idx * 2)
+        
+        col_letter = get_column_letter(cell_col)
+        cell_ref = f"{col_letter}{cell_row}"
 
-    img_byte_arr = io.BytesIO()
-    print_w, print_h = 380, 205
-    resized_img = label_img.resize((print_w, print_h), Image.Resampling.LANCZOS)
-    resized_img.save(img_byte_arr, format='PNG')
-    img_byte_arr.seek(0)
+        ws.column_dimensions[col_letter].width = 52
+        ws.row_dimensions[cell_row].height = 160
 
-    xl_img = XLImage(img_byte_arr)
-    xl_img.anchor = cell_ref
-    ws.add_image(xl_img)
+        xl_img = XLImage(str(img_path))
+        xl_img.anchor = cell_ref
+        ws.add_image(xl_img)
 
     wb.save(EXCEL_LABEL_PATH)
 
-    with open(COUNT_FILE, "w", encoding="utf-8") as f:
-        f.write(str(count + 1))
+def add_label_to_history(name, label_img):
+    """新しいラベルを履歴に追加し、Excelを更新する"""
+    history = []
+    if LABEL_HISTORY_FILE.exists():
+        try:
+            with open(LABEL_HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except:
+            pass
+    
+    filename = f"label_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.png"
+    img_path = TEMP_LABEL_DIR / filename
+    
+    print_w, print_h = 380, 205
+    resized_img = label_img.resize((print_w, print_h), Image.Resampling.LANCZOS)
+    resized_img.save(img_path, format='PNG')
+    
+    history.append({"name": name, "img_filename": filename})
+    
+    with open(LABEL_HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+        
+    rebuild_excel()
+
+def delete_label_from_history(index):
+    """指定されたラベルを削除し、間を詰めてExcelを再構築する"""
+    history = []
+    if LABEL_HISTORY_FILE.exists():
+        try:
+            with open(LABEL_HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except:
+            pass
+            
+    if 0 <= index < len(history):
+        img_path = TEMP_LABEL_DIR / history[index]["img_filename"]
+        if img_path.exists():
+            try:
+                img_path.unlink()
+            except:
+                pass
+        history.pop(index)
+        
+        with open(LABEL_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+            
+        rebuild_excel()
+
+def clear_history():
+    """すべての履歴とExcelを白紙に戻す"""
+    if EXCEL_LABEL_PATH.exists():
+        try: EXCEL_LABEL_PATH.unlink()
+        except: pass
+    if LABEL_HISTORY_FILE.exists():
+        try: LABEL_HISTORY_FILE.unlink()
+        except: pass
+    for f in TEMP_LABEL_DIR.glob("*.png"):
+        try: f.unlink()
+        except: pass
 
 # --- メインアプリ ---
 def main():
@@ -358,9 +397,6 @@ def main():
     else:
         st.set_page_config(page_title="設備QR＆PDF管理システム", layout="wide", initial_sidebar_state="expanded")
         
-        # ==========================================
-        # --- ⚙️ システム設定（サイドバー） ---
-        # ==========================================
         st.sidebar.header("⚙️ システム詳細設定")
         
         st.sidebar.markdown("---")
@@ -392,41 +428,58 @@ def main():
         st.sidebar.subheader("📄 ファイル名出力設定")
         include_equip_name = st.sidebar.checkbox("ダウンロードファイル名に「設備名称」を含める", value=True)
 
-        # --- 新設：Excel台帳管理エリア ---
+        # ==========================================
+        # --- 🖨️ 超便利！印刷用Excel台帳UI ---
+        # ==========================================
         st.sidebar.markdown("---")
         st.sidebar.subheader("🖨️ 印刷用Excel台帳")
         
-        # --- 変更：現在の蓄積状況をリアルタイム表示する「配置マップ」UIを追加 ---
-        try:
-            with open(COUNT_FILE, "r", encoding="utf-8") as f:
-                current_count = int(f.read().strip())
-        except Exception:
-            current_count = 0
-            
+        history = []
+        if LABEL_HISTORY_FILE.exists():
+            try:
+                with open(LABEL_HISTORY_FILE, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+            except:
+                pass
+                
+        current_count = len(history)
+        
         if current_count == 0:
             st.sidebar.info("🈳 現在、台帳は白紙です。")
         else:
             st.sidebar.success(f"✅ 現在 **{current_count}枚** のラベルが配置されています！")
             
-            # 視覚的な配置マップ（絵文字で表現）
+            # 視覚的な配置マップ（番号付き）
             rows_per_col = 5
-            display_cols = max(3, (current_count // rows_per_col) + 1) # 最低3列は表示して全体像を見せる
+            display_cols = max(3, (current_count // rows_per_col) + 1)
             
-            grid_html = "<div style='background-color:#f0f2f6; padding:10px; border-radius:5px; font-size:18px; line-height:1.5; letter-spacing:4px; text-align:center;'>"
+            grid_html = "<div style='background-color:#f0f2f6; padding:10px; border-radius:5px; font-size:18px; line-height:1.5; text-align:center;'>"
             for r in range(rows_per_col):
                 row_str = ""
                 for c in range(display_cols):
                     idx = c * rows_per_col + r
                     if idx < current_count:
-                        row_str += "🟨" # 配置済み（黄色のラベル）
+                        # 丸数字に変換（①〜⑳まで対応）
+                        num_char = chr(9311 + idx + 1) if idx < 20 else f"({idx+1})"
+                        row_str += f"<span style='display:inline-block; width:30px; font-weight:bold; color:#d4af37;'>{num_char}</span>"
                     else:
-                        row_str += "⬜" # 未配置（空白のセル）
+                        row_str += "<span style='display:inline-block; width:30px; color:#ccc;'>⬜</span>"
                 grid_html += f"{row_str}<br>"
             grid_html += "</div>"
             
-            st.sidebar.markdown("**【現在のExcel配置マップ】**")
+            st.sidebar.markdown("**【現在の配置マップ】**")
             st.sidebar.markdown(grid_html, unsafe_allow_html=True)
-            st.sidebar.caption("※ 🟨: 配置済み / ⬜: 空白")
+            
+            # 配置済みリストと削除ボタン
+            st.sidebar.markdown("**【配置済みラベル一覧】**")
+            for i, item in enumerate(history):
+                col1, col2 = st.sidebar.columns([4, 1])
+                num_char = chr(9311 + i + 1) if i < 20 else f"({i+1})"
+                col1.write(f"**{num_char}** {item['name']}")
+                # ゴミ箱（削除）ボタン
+                if col2.button("❌", key=f"del_btn_{i}", help="このラベルを削除して間を詰める"):
+                    delete_label_from_history(i)
+                    st.rerun()
 
         if EXCEL_LABEL_PATH.exists():
             with open(EXCEL_LABEL_PATH, "rb") as f:
@@ -437,10 +490,7 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             if st.sidebar.button("🗑️ 台帳をリセット (白紙に戻す)"):
-                if EXCEL_LABEL_PATH.exists():
-                    EXCEL_LABEL_PATH.unlink()
-                if COUNT_FILE.exists():
-                    COUNT_FILE.unlink()
+                clear_history()
                 st.sidebar.success("Excel台帳を白紙にリセットしました！")
                 st.rerun()
         
@@ -466,9 +516,6 @@ def main():
             img_loto1 = st.file_uploader("LOTO手順書（1ページ目）", type=["png", "jpg", "jpeg"])
             img_loto2 = st.file_uploader("LOTO手順書（2ページ目）", type=["png", "jpg", "jpeg"])
             
-        # ==========================================
-        # --- 3. PDFプレビュー確認 ---
-        # ==========================================
         st.markdown("---")
         st.header("3. PDFプレビュー確認")
         st.info("💡 発行（クラウド保存）する前に、まずはここでPDFの出来栄えや画像の向きをチェックしてください。")
@@ -513,13 +560,9 @@ def main():
             else:
                 st.error("管理番号、設備名称、使用電源は全て必須です。")
 
-        # ==========================================
-        # --- 4. データ保存 ＆ 印刷用ラベル発行 ---
-        # ==========================================
         st.markdown("---")
         st.header("4. データ保存 ＆ 印刷用ラベル発行")
         
-        # ====== 手動モード ======
         if save_mode == "1. 手動ダウンロードのみ":
             long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】（GitHub等のURL）を貼り付け")
             if st.button("🖨️ 手動設定で印刷用QRラベルを発行する", type="primary"):
@@ -547,9 +590,9 @@ def main():
                         st.subheader("🏷️ コンセント・タグ用ラベルのダウンロード")
                         label_data = {"name": name, "power": power, "img_qr": img_qr}
                         
-                        # --- Excelへの自動追記処理 ---
+                        # --- 履歴に追加し、Excelを再構築 ---
                         label_img = create_label_image(label_data)
-                        append_label_to_excel(label_img)
+                        add_label_to_history(name, label_img)
                         
                         buf = io.BytesIO()
                         label_img.save(buf, format="PNG")
@@ -562,7 +605,6 @@ def main():
                 else:
                     st.error("「管理番号」「設備名称」「使用電源」「URL」の全てを入力してください。")
                     
-        # ====== GitHub全自動モード ======
         elif save_mode == "2. GitHubへ自動アップロード":
             st.info("💡 プレビューで問題がなければ、ボタン1つで【GitHub保存 ＋ QR発行】を全自動で行います。")
             if st.button("🖨️ 【全自動】PDFをGitHubへ保存し、印刷用QRラベルを発行する", type="primary"):
@@ -571,7 +613,6 @@ def main():
                 elif did and name and power:
                     with st.spinner("☁️ GitHubのクラウドへ自動アップロード中...（約5〜10秒かかります）"):
                         try:
-                            # 1. PDFの再作成
                             data = {
                                 "id": did,
                                 "name": name,
@@ -587,7 +628,6 @@ def main():
                             pdf_path = PDF_DIR / f"{safe_id}.pdf"
                             create_pdf(data, pdf_path)
                             
-                            # 2. GitHubへのAPI通信
                             with open(pdf_path, "rb") as f:
                                 encoded_content = base64.b64encode(f.read()).decode("utf-8")
                             
@@ -624,7 +664,6 @@ def main():
                                 res_data = json.loads(response.read().decode("utf-8"))
                                 github_pdf_url = res_data["content"]["html_url"]
                             
-                            # 3. QRコードの生成と台帳登録
                             long_url = github_pdf_url
                             qr_path = QR_DIR / f"{safe_id}_qr.png"
                             clean_base_url = "https://equipment-qr-manager.streamlit.app"
@@ -644,14 +683,13 @@ def main():
                             
                             st.success(f"✅ GitHubへの保存とQRコード生成が完了しました！\n保管先URL: {long_url}")
                             
-                            # 4. ラベル画像の表示とExcel追記
                             st.markdown("---")
                             st.subheader("🏷️ コンセント・タグ用ラベルのダウンロード")
                             label_data = {"name": name, "power": power, "img_qr": img_qr}
                             
-                            # --- Excelへの自動追記処理 ---
+                            # --- 履歴に追加し、Excelを再構築 ---
                             label_img = create_label_image(label_data)
-                            append_label_to_excel(label_img)
+                            add_label_to_history(name, label_img)
                             
                             buf = io.BytesIO()
                             label_img.save(buf, format="PNG")
@@ -667,7 +705,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
