@@ -6,6 +6,8 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 import io
+import base64  # GitHub通信用
+import json    # GitHub通信用
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # PDF生成用ライブラリ
@@ -245,14 +247,17 @@ def main():
         
         st.sidebar.markdown("---")
         st.sidebar.subheader("💾 自動保存モード設定")
-        # --- ここで保存先を選択させます ---
         save_mode = st.sidebar.radio(
             "PDFとQRコードの保存方式を選択:",
             ["1. 手動ダウンロードのみ (現在の方式)", "2. GitHubへ自動アップロード", "3. 社内共有フォルダへ自動保存"]
         )
         
+        # --- GitHubの合鍵入力欄を追加 ---
         if save_mode == "2. GitHubへ自動アップロード":
-            st.sidebar.warning("※機能実装準備中※\n次回、GitHubのアクセストークン（合鍵）を設定する機能を追加します。")
+            st.sidebar.info("💡 GitHubの合鍵（トークン）を設定すると全自動化されます。")
+            github_repo = st.sidebar.text_input("リポジトリ名", value="equipment-portal/qr-manager")
+            github_token = st.sidebar.text_input("アクセス・トークン (ghp_...)", type="password")
+            
         elif save_mode == "3. 社内共有フォルダへ自動保存":
             st.sidebar.warning("※機能実装準備中※\n会社のPCで直接アプリを動かす（オンプレミス稼働）環境への移行が必要です。")
             local_path = st.sidebar.text_input("共有フォルダのパス (例: Z:\\LOTO手順書)", value=r"C:\Equipment_PDF")
@@ -261,7 +266,6 @@ def main():
         st.sidebar.subheader("📄 ファイル名出力設定")
         include_equip_name = st.sidebar.checkbox("ダウンロードファイル名に「設備名称」を含める", value=True)
         
-        # メイン画面
         st.title("🏭 設備QR＆PDF管理システム")
         st.info("※ この画面はPCでのPDF作成・台帳登録用です。")
         
@@ -285,8 +289,8 @@ def main():
             img_loto2 = st.file_uploader("LOTO手順書（2ページ目）", type=["png", "jpg", "jpeg"])
             
         st.markdown("---")
-        st.header("3. PDF生成・保存")
-        if st.button("PDFを生成してダウンロード", type="primary"):
+        st.header("3. PDFのプレビュー・手動保存")
+        if st.button("PDFを生成してプレビュー", type="secondary"):
             if did and name and power:
                 try:
                     data = {
@@ -300,100 +304,160 @@ def main():
                         "img_loto2": img_loto2,
                         "is_related_loto": is_related_loto
                     }
-                    
                     safe_id = safe_filename(did)
                     pdf_path = PDF_DIR / f"{safe_id}.pdf"
-                    
                     create_pdf(data, pdf_path)
                     
-                    if include_equip_name:
-                        dl_file_name = f"{safe_id}_{safe_filename(name)}.pdf"
-                    else:
-                        dl_file_name = f"{safe_id}.pdf"
+                    dl_file_name = f"{safe_id}_{safe_filename(name)}.pdf" if include_equip_name else f"{safe_id}.pdf"
                     
                     if pdf_path.exists():
-                        st.success(f"{dl_file_name} の生成が完了しました！")
+                        st.success("プレビュー用のPDF生成が完了しました！")
                         with open(pdf_path, "rb") as pdf_file:
-                            st.download_button(
-                                label="📥 PDFをダウンロード",
-                                data=pdf_file,
-                                file_name=dl_file_name,
-                                mime="application/pdf"
-                            )
-                    else:
-                        st.error("エラー：PDFの保存に失敗しました。")
+                            st.download_button(label="📥 PDFを手動でダウンロード", data=pdf_file, file_name=dl_file_name, mime="application/pdf")
                 except Exception as e:
                     st.error(f"PDF生成エラー: {str(e)}")
             else:
                 st.error("管理番号、設備名称、使用電源は全て必須です。")
 
         st.markdown("---")
-        st.header("4. 自動転送QRコード生成")
+        st.header("4. クラウド保存 ＆ QRコード生成")
         
-        # 保存モードがGitHubまたは共有フォルダの時は手動URL入力を隠すなどのUI切り替え（現在は手動用のまま）
-        long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】（GitHub等のURL）を貼り付け")
-        if st.button("QRコードを生成して台帳更新", type="secondary"):
-            if long_url and did and name and power:
-                try:
-                    safe_id = safe_filename(did)
-                    qr_path = QR_DIR / f"{safe_id}_qr.png"
+        # ====== 手動モード ======
+        if save_mode == "1. 手動ダウンロードのみ (現在の方式)":
+            long_url = st.text_input("パソコンでPDFを開いた時の【上部アドレスバーの長いURL】（GitHub等のURL）を貼り付け")
+            if st.button("QRコードを生成して台帳更新", type="primary"):
+                if long_url and did and name and power:
+                    try:
+                        safe_id = safe_filename(did)
+                        qr_path = QR_DIR / f"{safe_id}_qr.png"
+                        clean_base_url = "https://equipment-qr-manager.streamlit.app"
+                        dynamic_url = f"{clean_base_url}/?id={did}"
+                        img_qr = qrcode.make(dynamic_url)
+                        img_qr.save(qr_path)
+                        
+                        if DB_CSV.exists():
+                            df = pd.read_csv(DB_CSV)
+                            df = df[df["ID"].astype(str) != str(did)]
+                        else:
+                            df = pd.DataFrame(columns=["ID", "Name", "Power", "URL", "Updated"])
+                        
+                        new_data = {"ID": did, "Name": name, "Power": power, "URL": long_url, "Updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                        df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+                        df.to_csv(DB_CSV, index=False)
+                        st.success("手動設定でのQRコード生成と台帳登録が完了しました！")
+                        
+                        st.markdown("---")
+                        st.subheader("🏷️ コンセント・タグ用ラベルのダウンロード")
+                        label_data = {"name": name, "power": power, "img_qr": img_qr}
+                        label_img = create_label_image(label_data)
+                        buf = io.BytesIO()
+                        label_img.save(buf, format="PNG")
+                        st.image(label_img, caption="2.5cm × 4cm 印刷用ラベル", width=300)
+                        
+                        label_dl_name = f"{safe_id}_{safe_filename(name)}_label.png" if include_equip_name else f"{safe_id}_label.png"
+                        st.download_button(label="📥 ラベル画像(PNG)をダウンロード", data=buf.getvalue(), file_name=label_dl_name, mime="image/png")
+                    except Exception as e:
+                        st.error(f"エラー: {str(e)}")
+                else:
+                    st.error("「管理番号」「設備名称」「使用電源」「URL」の全てを入力してください。")
                     
-                    clean_base_url = "https://equipment-qr-manager.streamlit.app"
-                    dynamic_url = f"{clean_base_url}/?id={did}"
-                    
-                    img_qr = qrcode.make(dynamic_url)
-                    img_qr.save(qr_path)
-                    st.success("自動転送用のQRコードを生成しました！")
-                    
-                    if DB_CSV.exists():
-                        df = pd.read_csv(DB_CSV)
-                        df = df[df["ID"].astype(str) != str(did)]
-                    else:
-                        df = pd.DataFrame(columns=["ID", "Name", "Power", "URL", "Updated"])
-                    
-                    new_data = {
-                        "ID": did,
-                        "Name": name,
-                        "Power": power,
-                        "URL": long_url,
-                        "Updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
-                    df.to_csv(DB_CSV, index=False)
-                    st.info("台帳(devices.csv)に最終目的地を記録しました。")
-                    
-                    st.markdown("---")
-                    st.subheader("🏷️ コンセント・タグ用ラベルのダウンロード")
-                    
-                    label_data = {
-                        "name": name,
-                        "power": power,
-                        "img_qr": img_qr
-                    }
-                    label_img = create_label_image(label_data)
-                    
-                    buf = io.BytesIO()
-                    label_img.save(buf, format="PNG")
-                    buf.seek(0)
-                    byte_im = buf.getvalue()
-                    
-                    st.image(label_img, caption="2.5cm × 4cm 印刷用ラベル", width=300)
-                    
-                    if include_equip_name:
-                        label_dl_name = f"{safe_id}_{safe_filename(name)}_label.png"
-                    else:
-                        label_dl_name = f"{safe_id}_label.png"
-                    
-                    st.download_button(
-                        label="📥 ラベル画像(PNG)をダウンロード",
-                        data=byte_im,
-                        file_name=label_dl_name,
-                        mime="image/png"
-                    )
-                except Exception as e:
-                    st.error(f"QRコード・ラベル生成エラー: {str(e)}")
-            else:
-                st.error("「管理番号」「設備名称」「使用電源」「URL」の全てを入力してください。")
+        # ====== GitHub全自動モード ======
+        elif save_mode == "2. GitHubへ自動アップロード":
+            st.info("💡 ボタン1つで、PDFの作成・GitHubへのアップロード・QRコードの発行を【全自動】で行います。")
+            if st.button("🚀 【全自動】PDF作成 ＋ GitHub保存 ＋ QRコード発行", type="primary"):
+                if not github_repo or not github_token:
+                    st.error("左の「⚙️ システム詳細設定」から、GitHubのリポジトリ名とアクセス・トークンを入力してください。")
+                elif did and name and power:
+                    with st.spinner("🚀 GitHubのクラウドへ自動アップロード中...（約5〜10秒かかります）"):
+                        try:
+                            # 1. PDFの作成
+                            data = {
+                                "id": did,
+                                "name": name,
+                                "power": power,
+                                "img_exterior": img_exterior,
+                                "img_outlet": img_outlet,
+                                "img_label": img_label,
+                                "img_loto1": img_loto1,
+                                "img_loto2": img_loto2,
+                                "is_related_loto": is_related_loto
+                            }
+                            safe_id = safe_filename(did)
+                            pdf_path = PDF_DIR / f"{safe_id}.pdf"
+                            create_pdf(data, pdf_path)
+                            
+                            # 2. GitHubへのAPI通信（アップロード）
+                            with open(pdf_path, "rb") as f:
+                                encoded_content = base64.b64encode(f.read()).decode("utf-8")
+                            
+                            file_name_for_github = f"{safe_id}_{safe_filename(name)}.pdf" if include_equip_name else f"{safe_id}.pdf"
+                            api_url = f"https://api.github.com/repos/{github_repo}/contents/pdfs/{file_name_for_github}"
+                            
+                            # 既に同じファイルがあるかチェックして上書き対応する
+                            sha = None
+                            try:
+                                req_check = urllib.request.Request(api_url)
+                                req_check.add_header("Authorization", f"token {github_token}")
+                                with urllib.request.urlopen(req_check) as response:
+                                    res_data = json.loads(response.read().decode("utf-8"))
+                                    sha = res_data["sha"]
+                            except:
+                                pass
+                                
+                            payload = {
+                                "message": f"Auto upload {file_name_for_github} from App",
+                                "content": encoded_content,
+                                "branch": "main"
+                            }
+                            if sha:
+                                payload["sha"] = sha
+                                
+                            req = urllib.request.Request(api_url, data=json.dumps(payload).encode("utf-8"), method="PUT")
+                            req.add_header("Authorization", f"token {github_token}")
+                            req.add_header("Content-Type", "application/json")
+                            req.add_header("Accept", "application/vnd.github.v3+json")
+                            
+                            with urllib.request.urlopen(req) as response:
+                                res_data = json.loads(response.read().decode("utf-8"))
+                                # GitHub上でPDFを表示するためのURLを取得
+                                github_pdf_url = res_data["content"]["html_url"]
+                            
+                            # 3. QRコードの生成と台帳登録
+                            long_url = github_pdf_url
+                            qr_path = QR_DIR / f"{safe_id}_qr.png"
+                            clean_base_url = "https://equipment-qr-manager.streamlit.app"
+                            dynamic_url = f"{clean_base_url}/?id={did}"
+                            img_qr = qrcode.make(dynamic_url)
+                            img_qr.save(qr_path)
+                            
+                            if DB_CSV.exists():
+                                df = pd.read_csv(DB_CSV)
+                                df = df[df["ID"].astype(str) != str(did)]
+                            else:
+                                df = pd.DataFrame(columns=["ID", "Name", "Power", "URL", "Updated"])
+                            
+                            new_data = {"ID": did, "Name": name, "Power": power, "URL": long_url, "Updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                            df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+                            df.to_csv(DB_CSV, index=False)
+                            
+                            st.success(f"✅ GitHubへの保存とQRコード生成が完了しました！\n保管先URL: {long_url}")
+                            
+                            # 4. ラベル画像の表示
+                            st.markdown("---")
+                            st.subheader("🏷️ コンセント・タグ用ラベルのダウンロード")
+                            label_data = {"name": name, "power": power, "img_qr": img_qr}
+                            label_img = create_label_image(label_data)
+                            buf = io.BytesIO()
+                            label_img.save(buf, format="PNG")
+                            st.image(label_img, caption="2.5cm × 4cm 印刷用ラベル", width=300)
+                            
+                            label_dl_name = f"{safe_id}_{safe_filename(name)}_label.png" if include_equip_name else f"{safe_id}_label.png"
+                            st.download_button(label="📥 ラベル画像(PNG)をダウンロード", data=buf.getvalue(), file_name=label_dl_name, mime="image/png")
+                            
+                        except Exception as e:
+                            st.error(f"GitHub連携エラー: {str(e)}\n※トークンが間違っているか、権限(repo)が不足している可能性があります。")
+                else:
+                    st.error("管理番号、設備名称、使用電源は全て必須です。")
 
 if __name__ == "__main__":
     main()
